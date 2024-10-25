@@ -23,3 +23,5 @@ requests-oauthlib==2.0.0
 rsa==4.9
 urllib3==2.2.3
 Werkzeug==3.0.6
+gunicorn==20.1.0
+opencv-python-headless
