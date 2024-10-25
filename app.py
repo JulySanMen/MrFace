@@ -12,7 +12,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from dotenv import load_dotenv
 
-app = Flask(_name_)
+app = Flask(__name__)
 CORS(app)
 
 # Cargar las variables de entorno desde el archivo .env
