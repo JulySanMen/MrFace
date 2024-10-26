@@ -67,9 +67,9 @@ def detectar_Puntos_Faciales():
                         h, w, _ = image_np.shape
                         x = int(landmark.x * w)
                         y = int(landmark.y * h)
-                        size = 5
+                        size = 10
                         color = (255, 0, 0)
-                        thickness = 2
+                        thickness = 5
 
                         draw = ImageDraw.Draw(imagen_con_puntos)
                         draw.line((x - size, y - size, x + size, y + size), fill=color, width=thickness)
