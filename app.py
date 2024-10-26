@@ -23,7 +23,7 @@ CLIENT_SECRET_JSON = os.getenv('GOOGLE_DRIVE_CREDENTIALS')
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 # ID de la carpeta donde deseas subir la imagen
-FOLDER_ID = '1hUGZeEzzfLClTNQLxMbofcffNLu_4jJ0'
+FOLDER_ID = 'LHKFduSGrOZNQM__5LF1HRAiduhyHMl'
 
 
 # Inicializar el servicio de Google Drive
