@@ -134,6 +134,11 @@ def procesar_transformacion():
                         h, w, _ = imagen_np.shape
                         x = int(landmark.x * w)
                         y = int(landmark.y * h)
+
+                        # Ajustar la coordenada y si la operación fue de volteo vertical
+                        if operacion == 'vertical_flip':
+                            y = h - y  # Invertir la coordenada y
+
                         size = 10
                         color = (255, 0, 0)
                         thickness = 5
@@ -151,6 +156,7 @@ def procesar_transformacion():
     return jsonify({
         'image_with_points_base64': base64.b64encode(img_data).decode('utf-8')
     })
+
 
 
 
