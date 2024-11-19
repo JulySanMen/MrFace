@@ -105,12 +105,9 @@ def procesar_transformacion():
         return jsonify({'error': 'No hay una imagen cargada para procesar'})
 
     operacion = request.args.get('operation', 'original')
-    imagen = Image.fromarray(imagen_original_np)
+    imagen = Image.fromarray(imagen_original_np)  # Crear una copia de la imagen original
 
-    # Crear una copia de la imagen para dibujar los puntos nuevamente
-    imagen_con_puntos = imagen.copy()
-
-    # Realizar la transformación solicitada
+    # Aplicar la operación solicitada
     if operacion == 'brightness':
         enhancer = ImageEnhance.Brightness(imagen)
         imagen = enhancer.enhance(1.5)  # Incrementar brillo
@@ -119,13 +116,17 @@ def procesar_transformacion():
     elif operacion == 'vertical_flip':
         imagen = imagen.transpose(Image.FLIP_TOP_BOTTOM)
 
-    # Reprocesar la imagen para detectar y dibujar los puntos faciales en la imagen transformada
+    # Convertir la imagen transformada a formato numpy para procesar los puntos faciales
+    imagen_np = np.array(imagen.convert('RGB'))  # Convertir la imagen transformada a un formato adecuado
+
+    # Detectar y dibujar los puntos faciales en la imagen transformada
     mp_face_mesh = mp.solutions.face_mesh
     with mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.5) as face_mesh:
-        imagen_np = np.array(imagen.convert('RGB'))  # Convertir la imagen transformada a un formato adecuado
         results = face_mesh.process(imagen_np)
         puntos_deseados = [70, 55, 285, 300, 33, 468, 133, 362, 473, 263, 4, 185, 0, 306, 17]
 
+        # Crear una copia de la imagen transformada para dibujar los puntos faciales
+        imagen_con_puntos = imagen.copy()
         if results.multi_face_landmarks:
             for face_landmarks in results.multi_face_landmarks:
                 for idx, landmark in enumerate(face_landmarks.landmark):
@@ -142,7 +143,7 @@ def procesar_transformacion():
                         draw.line((x - size, y - size, x + size, y + size), fill=color, width=thickness)
                         draw.line((x - size, y + size, x + size, y - size), fill=color, width=thickness)
 
-    # Convertir la imagen transformada con puntos a formato base64
+    # Convertir la imagen transformada con los puntos faciales a formato base64
     buffered = io.BytesIO()
     imagen_con_puntos.save(buffered, format="PNG")
     img_data = buffered.getvalue()
@@ -150,6 +151,7 @@ def procesar_transformacion():
     return jsonify({
         'image_with_points_base64': base64.b64encode(img_data).decode('utf-8')
     })
+
 
 
 if __name__ == '__main__':
