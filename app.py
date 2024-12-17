@@ -39,7 +39,7 @@ imagen_original_np = None
 def detectar_Puntos_Faciales():
     global imagen_original_np
     if 'file' not in request.files:
-        return jsonify({'error': 'No se recibió correctamente la imagen'})
+        return jsonify({'error': 'No se recibió correctamente la imagen'}) 
 
     archivo = request.files['file']
     if archivo.filename == '':
