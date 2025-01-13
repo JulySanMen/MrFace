@@ -4,15 +4,16 @@ import json
 import mediapipe as mp
 import numpy as np
 from flask_cors import CORS
-from PIL import Image, ImageEnhance, ImageDraw
+from PIL import Image, ImageDraw, ImageEnhance
 import io
 import base64
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from dotenv import load_dotenv
+from fer import FER
 
-app = Flask(__name__)
+app = Flask(_name_)
 CORS(app)
 
 # Cargar las variables de entorno desde el archivo .env
@@ -23,143 +24,116 @@ CLIENT_SECRET_JSON = os.getenv('GOOGLE_DRIVE_CREDENTIALS')
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 # ID de la carpeta donde deseas subir la imagen
-FOLDER_ID = '1RLHKFduSGrOZNQM__5LF1HRAiduhyHMl'
+FOLDER_ID = '1v8Xss5sKEEgyPHfEBtXYBTHtUevdrhjd'
 
-# Inicializar el servicio de Google Drive
+# Traducción de emociones
+TRADUCCION_EMOCIONES = {
+    "angry": "enojado",
+    "disgust": "disgustado",
+    "fear": "miedo",
+    "happy": "feliz",
+    "sad": "triste",
+    "surprise": "sorprendido",
+    "neutral": "neutral"
+}
+
+
 def obtener_servicio_drive():
-    creds = service_account.Credentials.from_service_account_info(
-        json.loads(CLIENT_SECRET_JSON), scopes=SCOPES)
-    service = build('drive', 'v3', credentials=creds)
-    return service
+    """Inicializa el servicio de Google Drive."""
+    try:
+        creds = service_account.Credentials.from_service_account_info(
+            json.loads(CLIENT_SECRET_JSON), scopes=SCOPES)
+        return build('drive', 'v3', credentials=creds)
+    except Exception as e:
+        raise Exception(f"Error al cargar las credenciales: {e}")
 
-# Almacena la imagen original para restaurar
-imagen_original_np = None
+
+def convertir_a_base64(imagen):
+    """Convierte una imagen PIL a Base64."""
+    buffered = io.BytesIO()
+    imagen.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+
+def procesar_imagen_con_puntos(image_np):
+    """Procesa la imagen y añade puntos faciales usando Mediapipe."""
+    imagen = Image.fromarray(image_np)
+    mp_face_mesh = mp.solutions.face_mesh
+    puntos_deseados = [70, 55, 285, 300, 33, 468, 133, 362, 473, 263, 4, 185, 0, 306, 17]
+
+    with mp_face_mesh.FaceMesh(
+        static_image_mode=True, max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.5
+    ) as face_mesh:
+        results = face_mesh.process(image_np)
+        if results.multi_face_landmarks:
+            draw = ImageDraw.Draw(imagen)
+            for face_landmarks in results.multi_face_landmarks:
+                for idx, landmark in enumerate(face_landmarks.landmark):
+                    if idx in puntos_deseados:
+                        h, w, _ = image_np.shape
+                        x, y = int(landmark.x * w), int(landmark.y * h)
+                        draw.line((x - 4, y - 4, x + 4, y + 4), fill=(255, 0, 0), width=2)
+                        draw.line((x - 4, y + 4, x + 4, y - 4), fill=(255, 0, 0), width=2)
+    return imagen
+
 
 @app.route('/upload', methods=['POST'])
-def detectar_Puntos_Faciales():
-    global imagen_original_np
+def detectar_puntos_y_procesar_imagenes():
+    """Procesa la imagen, detecta puntos faciales y emociones."""
     if 'file' not in request.files:
-        return jsonify({'error': 'No se recibió correctamente la imagen'}) 
+        return jsonify({'error': 'No se recibió correctamente la imagen'})
 
     archivo = request.files['file']
     if archivo.filename == '':
         return jsonify({'error': 'No se cargó ninguna imagen'})
 
-    # Leer el contenido de la imagen original
-    imagen_original = archivo.read()  # Leer el contenido del archivo original
-    archivo.seek(0)  # Reiniciar el flujo del archivo para poder usarlo nuevamente
+    try:
+        # Leer y procesar la imagen original
+        imagen_pil = Image.open(archivo).convert('RGB')
+        imagen_pil = imagen_pil.resize((300, 300))  # Reducir resolución para ahorrar recursos
+        imagen_np = np.array(imagen_pil)
 
-    # Procesar la imagen para detectar puntos faciales
-    imagen_original_np = np.array(Image.open(archivo).convert('RGB'))
-    mp_face_mesh = mp.solutions.face_mesh
+        # Mejorar la imagen (contraste y nitidez)
+        imagen_mejorada = ImageEnhance.Contrast(imagen_pil).enhance(1.5)
+        imagen_mejorada = ImageEnhance.Sharpness(imagen_mejorada).enhance(2.0)
 
-    if imagen_original_np is None:
-        return jsonify({'error': 'Error al cargar la imagen'})
+        # Detectar puntos faciales
+        imagen_con_puntos = procesar_imagen_con_puntos(imagen_np)
 
-    # Crear una copia de la imagen para dibujar los puntos
-    imagen_con_puntos = Image.fromarray(imagen_original_np)
+        # Detectar emociones usando FER
+        detector = FER(mtcnn=False)  # Desactivar MTCNN para reducir el consumo de recursos
+        emociones = detector.detect_emotions(np.array(imagen_mejorada))
+        if emociones:
+            emocion_principal_en = max(emociones[0]["emotions"], key=emociones[0]["emotions"].get)
+            emocion_principal = TRADUCCION_EMOCIONES.get(emocion_principal_en, emocion_principal_en)
+        else:
+            emocion_principal = "No se detectaron emociones"
 
-    with mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.5) as face_mesh:
-        results = face_mesh.process(imagen_original_np)
-        puntos_deseados = [70, 55, 285, 300, 33, 468, 133, 362, 473, 263, 4, 185, 0, 306, 17]
+        # Subir imagen a Google Drive
+        service = obtener_servicio_drive()
+        buffered = io.BytesIO()
+        imagen_pil.save(buffered, format="PNG")
+        archivo_drive = MediaIoBaseUpload(buffered, mimetype='image/png')
+        archivo_metadata = {
+            'name': archivo.filename,
+            'mimeType': 'image/png',
+            'parents': [FOLDER_ID]
+        }
+        archivo_drive_subido = service.files().create(body=archivo_metadata, media_body=archivo_drive).execute()
 
-        if results.multi_face_landmarks:
-            for face_landmarks in results.multi_face_landmarks:
-                for idx, landmark in enumerate(face_landmarks.landmark):
-                    if idx in puntos_deseados:
-                        h, w, _ = imagen_original_np.shape
-                        x = int(landmark.x * w)
-                        y = int(landmark.y * h)
-                        size = 10
-                        color = (255, 0, 0)
-                        thickness = 5
+        # Convertir la imagen procesada a Base64
+        img_data_puntos = convertir_a_base64(imagen_con_puntos)
 
-                        draw = ImageDraw.Draw(imagen_con_puntos)
-                        draw.line((x - size, y - size, x + size, y + size), fill=color, width=thickness)
-                        draw.line((x - size, y + size, x + size, y - size), fill=color, width=thickness)
+        return jsonify({
+            'image_with_points_base64': img_data_puntos,
+            'dominant_emotion': emocion_principal,
+            'drive_id': archivo_drive_subido.get('id')
+        })
 
-    # Convertir la imagen procesada a formato base64
-    buffered = io.BytesIO()
-    imagen_con_puntos.save(buffered, format="PNG")
-    img_data_con_puntos = buffered.getvalue()
-
-    # Sube la imagen original a Google Drive manteniendo su nombre
-    service = obtener_servicio_drive()
-    archivo_drive = MediaIoBaseUpload(io.BytesIO(imagen_original), mimetype='image/png')
-    archivo_metadata = {
-        'name': archivo.filename,  # Usar el nombre original del archivo
-        'mimeType': 'image/png',
-        'parents': [FOLDER_ID]  # Aquí especificas la carpeta
-    }
-    archivo_drive_subido = service.files().create(body=archivo_metadata, media_body=archivo_drive).execute()
-
-    return jsonify({
-        'image_with_points_base64': base64.b64encode(img_data_con_puntos).decode('utf-8'),  # Imagen con puntos
-        'drive_id': archivo_drive_subido.get('id')
-    })
-
-@app.route('/process', methods=['GET'])
-def procesar_transformacion():
-    global imagen_original_np
-    if imagen_original_np is None:
-        return jsonify({'error': 'No hay una imagen cargada para procesar'})
-
-    operacion = request.args.get('operation', 'original')
-    imagen = Image.fromarray(imagen_original_np)  # Crear una copia de la imagen original
-
-    # Aplicar la operación solicitada
-    if operacion == 'brightness':
-        enhancer = ImageEnhance.Brightness(imagen)
-        imagen = enhancer.enhance(1.5)  # Incrementar brillo
-    elif operacion == 'horizontal_flip':
-        imagen = imagen.transpose(Image.FLIP_LEFT_RIGHT)
-    elif operacion == 'vertical_flip':
-        imagen = imagen.transpose(Image.FLIP_TOP_BOTTOM)
-
-    # Convertir la imagen transformada a formato numpy para procesar los puntos faciales
-    imagen_np = np.array(imagen.convert('RGB'))  # Convertir la imagen transformada a un formato adecuado
-
-    # Detectar y dibujar los puntos faciales en la imagen transformada
-    mp_face_mesh = mp.solutions.face_mesh
-    with mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.5) as face_mesh:
-        results = face_mesh.process(imagen_np)
-        puntos_deseados = [70, 55, 285, 300, 33, 468, 133, 362, 473, 263, 4, 185, 0, 306, 17]
-
-        # Crear una copia de la imagen transformada para dibujar los puntos faciales
-        imagen_con_puntos = imagen.copy()
-        if results.multi_face_landmarks:
-            for face_landmarks in results.multi_face_landmarks:
-                for idx, landmark in enumerate(face_landmarks.landmark):
-                    if idx in puntos_deseados:
-                        h, w, _ = imagen_np.shape
-                        x = int(landmark.x * w)
-                        y = int(landmark.y * h)
-
-                        # Ajustar la coordenada y si la operación fue de volteo vertical
-                        if operacion == 'vertical_flip':
-                            y = h - y  # Invertir la coordenada y
-
-                        size = 10
-                        color = (255, 0, 0)
-                        thickness = 5
-
-                        # Dibuja los puntos en la imagen transformada
-                        draw = ImageDraw.Draw(imagen_con_puntos)
-                        draw.line((x - size, y - size, x + size, y + size), fill=color, width=thickness)
-                        draw.line((x - size, y + size, x + size, y - size), fill=color, width=thickness)
-
-    # Convertir la imagen transformada con los puntos faciales a formato base64
-    buffered = io.BytesIO()
-    imagen_con_puntos.save(buffered, format="PNG")
-    img_data = buffered.getvalue()
-
-    return jsonify({
-        'image_with_points_base64': base64.b64encode(img_data).decode('utf-8')
-    })
+    except Exception as e:
+        return jsonify({'error': f"Error al procesar la imagen: {str(e)}"})
 
 
-
-
-
-if __name__ == '__main__':
-    app.run(debug=True)
+if _name_ == '_main_':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
