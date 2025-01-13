@@ -13,7 +13,7 @@ from googleapiclient.http import MediaIoBaseUpload
 from dotenv import load_dotenv
 from fer import FER
 
-app = Flask(_name_)
+app = Flask(__name__)
 CORS(app)
 
 # Cargar las variables de entorno desde el archivo .env
@@ -134,6 +134,6 @@ def detectar_puntos_y_procesar_imagenes():
         return jsonify({'error': f"Error al procesar la imagen: {str(e)}"})
 
 
-if _name_ == '_main_':
+if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
