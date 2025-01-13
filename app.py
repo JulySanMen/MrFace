@@ -24,7 +24,7 @@ CLIENT_SECRET_JSON = os.getenv('GOOGLE_DRIVE_CREDENTIALS')
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 # ID de la carpeta donde deseas subir la imagen
-FOLDER_ID = '1v8Xss5sKEEgyPHfEBtXYBTHtUevdrhjd'
+FOLDER_ID = '1RLHKFduSGrOZNQM__5LF1HRAiduhyHMl'
 
 # Traducción de emociones
 TRADUCCION_EMOCIONES = {
