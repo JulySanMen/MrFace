@@ -34,4 +34,4 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE ${PORT}
 
 # Comando para ejecutar la aplicación
-CMD gunicorn --bind 0.0.0.0:$PORT app:app
+CMD gunicorn --bind 0.0.0.0:$PORT app:app --timeout 300 --workers 1
