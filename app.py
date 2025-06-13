@@ -12,6 +12,8 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from dotenv import load_dotenv
 from fer import FER
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
 
 app = Flask(__name__)
 CORS(app)
@@ -79,7 +81,7 @@ def procesar_imagen_con_puntos(image_np):
 
 @app.route('/upload', methods=['POST'])
 def detectar_puntos_y_procesar_imagenes():
-    """Procesa la imagen, detecta puntos faciales y emociones."""
+    """Procesa la imagen, detecta puntos faciales y emociones, y genera un PDF."""
     if 'file' not in request.files:
         return jsonify({'error': 'No se recibió correctamente la imagen'})
 
@@ -88,50 +90,78 @@ def detectar_puntos_y_procesar_imagenes():
         return jsonify({'error': 'No se cargó ninguna imagen'})
 
     try:
-        # Leer y procesar la imagen original
+        # --- Lectura y preprocesado ---
         imagen_pil = Image.open(archivo).convert('RGB')
-        imagen_pil = imagen_pil.resize((300, 300))  # Reducir resolución para ahorrar recursos
+        imagen_pil = imagen_pil.resize((300, 300))
         imagen_np = np.array(imagen_pil)
 
-        # Mejorar la imagen (contraste y nitidez)
+        # Mejora de contraste y nitidez
         imagen_mejorada = ImageEnhance.Contrast(imagen_pil).enhance(1.5)
         imagen_mejorada = ImageEnhance.Sharpness(imagen_mejorada).enhance(2.0)
 
         # Detectar puntos faciales
         imagen_con_puntos = procesar_imagen_con_puntos(imagen_np)
 
-        # Detectar emociones usando FER
-        detector = FER(mtcnn=False)  # Desactivar MTCNN para reducir el consumo de recursos
+        # Detectar emoción dominante
+        detector = FER(mtcnn=False)
         emociones = detector.detect_emotions(np.array(imagen_mejorada))
         if emociones:
-            emocion_principal_en = max(emociones[0]["emotions"], key=emociones[0]["emotions"].get)
-            emocion_principal = TRADUCCION_EMOCIONES.get(emocion_principal_en, emocion_principal_en)
+            en = max(emociones[0]["emotions"], key=emociones[0]["emotions"].get)
+            emocion_principal = TRADUCCION_EMOCIONES.get(en, en)
         else:
-            emocion_principal = "No se detectaron emociones"
+            emocion_principal = "No detectada"
 
-        # Subir imagen a Google Drive
+        # (Opcional) Subida a Drive...
         service = obtener_servicio_drive()
-        buffered = io.BytesIO()
-        imagen_pil.save(buffered, format="PNG")
-        archivo_drive = MediaIoBaseUpload(buffered, mimetype='image/png')
-        archivo_metadata = {
-            'name': archivo.filename,
-            'mimeType': 'image/png',
-            'parents': [FOLDER_ID]
-        }
-        archivo_drive_subido = service.files().create(body=archivo_metadata, media_body=archivo_drive).execute()
+        buf_drive = io.BytesIO()
+        imagen_pil.save(buf_drive, format='PNG')
+        buf_drive.seek(0)
+        media = MediaIoBaseUpload(buf_drive, mimetype='image/png')
+        meta = {'name': archivo.filename, 'parents':[FOLDER_ID]}
+        drive_file = service.files().create(body=meta, media_body=media).execute()
+        drive_id = drive_file.get('id')
 
-        # Convertir la imagen procesada a Base64
-        img_data_puntos = convertir_a_base64(imagen_con_puntos)
+        # --- Generar PDF en memoria ---
+        pdf_buffer = io.BytesIO()
+        c = canvas.Canvas(pdf_buffer, pagesize=letter)
+        width, height = letter
 
-        return jsonify({
-            'image_with_points_base64': img_data_puntos,
-            'dominant_emotion': emocion_principal,
-            'drive_id': archivo_drive_subido.get('id')
-        })
+        # Dibujar imagen: primero convertimos a un buffer de bytes
+        img_buffer = io.BytesIO()
+        imagen_con_puntos.save(img_buffer, format='PNG')
+        img_buffer.seek(0)
+        # Ajusta tamaño y posición según te convenga:
+        img_width = 300
+        img_height = 300
+        x = (width - img_width) / 2
+        y = height - img_height - 100
+        c.drawImage(img_buffer, x, y, img_width, img_height)
+
+        # Escribir texto de la emoción
+        text_x = 50
+        text_y = y - 50
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(text_x, text_y, f"Emoción dominante: {emocion_principal}")
+
+        # (Opcional) ID de Drive
+        c.setFont("Helvetica", 10)
+        c.drawString(text_x, text_y - 20, f"Drive file ID: {drive_id}")
+
+        c.showPage()
+        c.save()
+        pdf_buffer.seek(0)
+
+        # Devolver PDF
+        return send_file(
+            pdf_buffer,
+            as_attachment=True,
+            download_name='resultado.pdf',
+            mimetype='application/pdf'
+        )
 
     except Exception as e:
-        return jsonify({'error': f"Error al procesar la imagen: {str(e)}"})
+        return jsonify({'error': f"Error al procesar la imagen: {e}"})
+
 
 
 if __name__ == '__main__':
